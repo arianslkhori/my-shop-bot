@@ -68,7 +68,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS payments (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
-                amount BIGINT,
+                amount BIGINT DEFAULT 0,
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT NOW()
             )
@@ -154,13 +154,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     first_name = update.effective_user.first_name or ""
 
     add_user(user_id, username, first_name)
-
     start_text = get_setting("start_text")
 
     keyboard = [
-        ["🌐 خرید v2ray", "💻 خرید SSH"],
-        ["🌍 خرید WireGuard", "♾️ افزایش موجودی"],
-        ["💼 حساب کاربری", "📞 پشتیبانی"],
+        ["🍎 اپل ایدی", "🌐 خرید v2ray"],
+        ["♾️ افزایش موجودی", "💼 حساب کاربری"],
+        ["📞 پشتیبانی"],
     ]
     if user_id == ADMIN_ID:
         keyboard.append(["⚙️ پنل ادمین"])
@@ -174,7 +173,22 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    if "خرید v2ray" in text:
+    # --- اپل ایدی ---
+    if "اپل ایدی" in text:
+        keyboard = [
+            [
+                InlineKeyboardButton("🍎 اپ استور", callback_data="apple_appstore"),
+                InlineKeyboardButton("☁️ آیکلاد", callback_data="apple_icloud"),
+            ],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
+        ]
+        await update.message.reply_text(
+            "🍎 اپل ایدی مد نظرت کدومه ؟",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    # --- خرید v2ray ---
+    elif "خرید v2ray" in text:
         keyboard = [
             [InlineKeyboardButton("یک ماهه - ۱۰۰ گیگ - ۱۰۰,۰۰۰ تومان", callback_data="buy_v2ray_1")],
             [InlineKeyboardButton("دو ماهه - ۲۰۰ گیگ - ۱۸۰,۰۰۰ تومان", callback_data="buy_v2ray_2")],
@@ -185,62 +199,55 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
-    elif "خرید SSH" in text:
-        keyboard = [
-            [InlineKeyboardButton("یک ماهه - ۵۰,۰۰۰ تومان", callback_data="buy_ssh_1")],
-            [InlineKeyboardButton("دو ماهه - ۹۰,۰۰۰ تومان", callback_data="buy_ssh_2")],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
-        ]
-        await update.message.reply_text(
-            "💻 پلن‌های SSH:\n\nیکی رو انتخاب کن :",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-
-    elif "خرید WireGuard" in text:
-        keyboard = [
-            [InlineKeyboardButton("یک ماهه - ۸۰,۰۰۰ تومان", callback_data="buy_wg_1")],
-            [InlineKeyboardButton("دو ماهه - ۱۴۰,۰۰۰ تومان", callback_data="buy_wg_2")],
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
-        ]
-        await update.message.reply_text(
-            "🌍 پلن‌های WireGuard:\n\nیکی رو انتخاب کن :",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-
+    # --- افزایش موجودی ---
     elif "افزایش موجودی" in text:
-        card = get_setting("card_number")
-        owner = get_setting("card_owner")
-        keyboard = [
-            [InlineKeyboardButton("💳 ارسال رسید", callback_data="send_receipt")],
-        ]
+        context.user_data["awaiting"] = "amount"
         await update.message.reply_text(
-            f"💳 افزایش موجودی\n\n"
-            f"مبلغ مورد نظر رو به کارت زیر واریز کن :\n\n"
-            f"شماره کارت: `{card}`\n"
-            f"به نام: {owner}\n\n"
-            f"بعد از واریز، رسید رو بفرست :",
-            reply_markup=InlineKeyboardMarkup(keyboard),
+            "💰 چقدر می‌خوای افزایش بدی؟\n\n"
+            "مبلغ رو به تومان بفرست (فقط عدد).\n"
+            "مثلاً: `50000`",
             parse_mode="Markdown",
         )
 
+    # --- حساب کاربری ---
     elif "حساب کاربری" in text:
         user = get_user(user_id)
-        balance = user["balance"] if user else 0
-        await update.message.reply_text(
-            f"💼 حساب کاربری\n\n"
-            f"🆔 آیدی: `{user_id}`\n"
-            f"💰 موجودی: {balance:,} تومان",
-            parse_mode="Markdown",
-        )
+        if user:
+            balance = user["balance"]
+            first_name = user["first_name"] or "کاربر"
+            username = user["username"]
+            username_text = f"@{username}" if username else "ندارد"
+        else:
+            balance = 0
+            first_name = "کاربر"
+            username_text = "ندارد"
 
+        text = (
+            f"╭───────────────────╮\n"
+            f"   💼  **حساب کاربری شما**\n"
+            f"╰───────────────────╯\n\n"
+            f"👤 **نام:** {first_name}\n"
+            f"🔗 **یوزرنیم:** {username_text}\n"
+            f"🆔 **آیدی عددی:** `{user_id}`\n\n"
+            f"╭───────────────────╮\n"
+            f"   💰  **موجودی شما**\n"
+            f"╰───────────────────╯\n\n"
+            f"**{balance:,}** تومان\n\n"
+            f"✨ برای افزایش موجودی از منوی اصلی استفاده کن."
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+
+    # --- پشتیبانی ---
     elif "پشتیبانی" in text:
         support = get_setting("support_id")
         await update.message.reply_text(
-            f"📞 پشتیبانی\n\n"
+            f"📞 **پشتیبانی**\n\n"
             f"برای ارتباط با پشتیبانی به آیدی زیر پیام بده :\n\n"
-            f"{support}"
+            f"{support}",
+            parse_mode="Markdown",
         )
 
+    # --- پنل ادمین ---
     elif "پنل ادمین" in text and user_id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("📊 آمار", callback_data="admin_stats")],
@@ -253,8 +260,8 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚙️ پنل ادمین",
             reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-        # ---------- هندلر دکمه‌های شیشه‌ای ----------
+            )
+   # ---------- هندلر دکمه‌های شیشه‌ای ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -263,9 +270,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "back_main":
         keyboard = [
-            ["🌐 خرید v2ray", "💻 خرید SSH"],
-            ["🌍 خرید WireGuard", "♾️ افزایش موجودی"],
-            ["💼 حساب کاربری", "📞 پشتیبانی"],
+            ["🍎 اپل ایدی", "🌐 خرید v2ray"],
+            ["♾️ افزایش موجودی", "💼 حساب کاربری"],
+            ["📞 پشتیبانی"],
         ]
         if user_id == ADMIN_ID:
             keyboard.append(["⚙️ پنل ادمین"])
@@ -274,19 +281,23 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         )
 
+    elif data == "apple_appstore":
+        await query.edit_message_text(
+            "🍎 **اپ استور**\n\n"
+            "به‌زودی محصولات این بخش اضافه میشه...",
+            parse_mode="Markdown",
+        )
+
+    elif data == "apple_icloud":
+        await query.edit_message_text(
+            "☁️ **آیکلاد**\n\n"
+            "به‌زودی محصولات این بخش اضافه میشه...",
+            parse_mode="Markdown",
+        )
+
     elif data.startswith("buy_v2ray"):
         price = 100000 if data == "buy_v2ray_1" else 180000
         plan = "v2ray یک ماهه" if data == "buy_v2ray_1" else "v2ray دو ماهه"
-        await handle_purchase(query, user_id, plan, price)
-
-    elif data.startswith("buy_ssh"):
-        price = 50000 if data == "buy_ssh_1" else 90000
-        plan = "SSH یک ماهه" if data == "buy_ssh_1" else "SSH دو ماهه"
-        await handle_purchase(query, user_id, plan, price)
-
-    elif data.startswith("buy_wg"):
-        price = 80000 if data == "buy_wg_1" else 140000
-        plan = "WireGuard یک ماهه" if data == "buy_wg_1" else "WireGuard دو ماهه"
         await handle_purchase(query, user_id, plan, price)
 
     elif data == "send_receipt":
@@ -307,10 +318,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur.close()
             conn.close()
         await query.edit_message_text(
-            f"📊 آمار ربات\n\n"
+            f"📊 **آمار ربات**\n\n"
             f"👥 تعداد کاربران: {users_count}\n"
             f"💰 مجموع موجودی‌ها: {total_balance:,} تومان\n"
-            f"✅ پرداخت‌های تایید شده: {payments_count}"
+            f"✅ پرداخت‌های تایید شده: {payments_count}",
+            parse_mode="Markdown",
         )
 
     elif data == "admin_users" and user_id == ADMIN_ID:
@@ -322,7 +334,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         finally:
             cur.close()
             conn.close()
-        text = "👥 آخرین ۲۰ کاربر:\n\n"
+        text = "👥 **آخرین ۲۰ کاربر:**\n\n"
         for r in rows:
             text += f"🆔 `{r[0]}` - {r[1]} - {r[2]:,} تومان\n"
         await query.edit_message_text(text, parse_mode="Markdown")
@@ -358,7 +370,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     chat_id=row[0],
                     text=f"✅ پرداخت شما تایید شد.\n💰 {row[1]:,} تومان به موجودی اضافه شد."
                 )
-                await query.edit_message_caption(caption=f"✅ پرداخت #{pay_id} تایید شد.")
+                await query.edit_message_caption(
+                    caption=f"✅ پرداخت #{pay_id} تایید شد.\n💰 مبلغ: {row[1]:,} تومان"
+                )
         finally:
             cur.close()
             conn.close()
@@ -389,10 +403,11 @@ async def handle_purchase(query, user_id, plan, price):
 
     if balance < price:
         await query.edit_message_text(
-            f"❌ موجودی کافی نیست.\n\n"
+            f"❌ **موجودی کافی نیست**\n\n"
             f"💰 موجودی شما: {balance:,} تومان\n"
             f"💵 قیمت: {price:,} تومان\n\n"
-            f"اول موجودی رو افزایش بده."
+            f"اول موجودی رو افزایش بده.",
+            parse_mode="Markdown",
         )
         return
 
@@ -411,26 +426,64 @@ async def handle_purchase(query, user_id, plan, price):
 
     support = get_setting("support_id")
     await query.edit_message_text(
-        f"✅ خرید موفق!\n\n"
+        f"✅ **خرید موفق!**\n\n"
         f"📦 محصول: {plan}\n"
         f"💰 مبلغ: {price:,} تومان\n\n"
-        f"برای دریافت، به پشتیبانی پیام بده:\n{support}"
-    )
-    # ---------- هندلر رسید و پیام‌های ادمین ----------
+        f"برای دریافت، به پشتیبانی پیام بده:\n{support}",
+        parse_mode="Markdown",
+            )
+# ---------- هندلر پیام‌ها (رسید، مبلغ، ادمین) ----------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     awaiting = context.user_data.get("awaiting")
 
+    # --- دریافت مبلغ برای افزایش موجودی ---
+    if awaiting == "amount":
+        text = update.message.text.strip()
+        if not text.isdigit():
+            await update.message.reply_text("❌ لطفاً فقط عدد بفرست. مثلاً: `50000`", parse_mode="Markdown")
+            return
+
+        amount = int(text)
+        if amount < 1000:
+            await update.message.reply_text("❌ حداقل مبلغ ۱,۰۰۰ تومان است.")
+            return
+
+        context.user_data["awaiting"] = None
+        context.user_data["pending_amount"] = amount
+
+        card = get_setting("card_number")
+        owner = get_setting("card_owner")
+
+        keyboard = [
+            [InlineKeyboardButton("💳 ارسال رسید", callback_data="send_receipt")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="back_main")],
+        ]
+        await update.message.reply_text(
+            f"💳 **افزایش موجودی**\n\n"
+            f"💰 مبلغ: **{amount:,}** تومان\n\n"
+            f"مبلغ رو به کارت زیر واریز کن :\n\n"
+            f"💳 شماره کارت:\n`{card}`\n\n"
+            f"👤 به نام: {owner}\n\n"
+            f"بعد از واریز، دکمه **ارسال رسید** رو بزن :",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+        return
+
+    # --- دریافت عکس رسید ---
     if awaiting == "receipt" and update.message.photo:
         photo = update.message.photo[-1]
+        amount = context.user_data.get("pending_amount", 0)
         context.user_data["awaiting"] = None
+        context.user_data["pending_amount"] = None
 
         conn = get_db()
         cur = conn.cursor()
         try:
             cur.execute(
-                "INSERT INTO payments (user_id, amount, status) VALUES (%s, 0, 'pending') RETURNING id",
-                (user_id,)
+                "INSERT INTO payments (user_id, amount, status) VALUES (%s, %s, 'pending') RETURNING id",
+                (user_id, amount)
             )
             pay_id = cur.fetchone()[0]
             conn.commit()
@@ -449,17 +502,21 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=ADMIN_ID,
             photo=photo.file_id,
             caption=(
-                f"📸 رسید جدید\n\n"
+                f"📸 **رسید جدید**\n\n"
                 f"🆔 کاربر: `{user_id}`\n"
-                f"👤 نام: {user['first_name'] if user else 'ناشناس'}\n\n"
+                f"👤 نام: {user['first_name'] if user else 'ناشناس'}\n"
+                f"💰 مبلغ درخواستی: **{amount:,}** تومان\n\n"
                 f"برای تایید یا رد، دکمه رو بزن."
             ),
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
         )
-        await update.message.reply_text("✅ رسیدت برای ادمین ارسال شد. منتظر تایید باش.")
+        await update.message.reply_text(
+            "✅ رسیدت برای ادمین ارسال شد.\nمنتظر تایید باش. 🙏"
+        )
         return
 
+    # --- پیام‌های ادمین ---
     if user_id == ADMIN_ID and awaiting:
         text = update.message.text
 
@@ -506,4 +563,4 @@ if __name__ == "__main__":
 
     print("ربات آنلاین شد...")
     app.run_polling()
-    
+        
