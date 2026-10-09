@@ -501,20 +501,18 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == "__main__":
     import asyncio
 
-    async def main():
-        await init_db()
-        app = ApplicationBuilder().token(TOKEN).build()
+    asyncio.get_event_loop().run_until_complete(init_db())
 
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CallbackQueryHandler(callback_handler))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
-        app.add_handler(MessageHandler(filters.PHOTO, message_handler))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+    app = ApplicationBuilder().token(TOKEN).build()
 
-        print("ربات آنلاین شد...")
-        await app.run_polling()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, message_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    asyncio.run(main())
+    print("ربات آنلاین شد...")
+    app.run_polling()
     # ============================================
 # پایان کد
 # ============================================
