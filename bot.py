@@ -106,12 +106,23 @@ def init_db():
                 channel TEXT UNIQUE
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS configs (
+                id SERIAL PRIMARY KEY,
+                category TEXT,
+                type TEXT,
+                content TEXT,
+                used BOOLEAN DEFAULT FALSE,
+                used_by BIGINT,
+                used_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
         for key, value in DEFAULT_SETTINGS.items():
             cur.execute(
                 "INSERT INTO settings (key, value) VALUES (%s, %s) ON CONFLICT (key) DO NOTHING",
                 (key, str(value)),
             )
-        # محصولات پیش‌فرض
         cur.execute("SELECT COUNT(*) FROM products")
         if cur.fetchone()[0] == 0:
             defaults = [
@@ -119,7 +130,6 @@ def init_db():
                 ("v2ray", "دو ماهه - ۲۰۰ گیگ", 180000),
                 ("apple", "اپ استور", 50000),
                 ("apple", "آیکلاد", 80000),
-                ("ssh", "SSH یک ماهه", 50000),
             ]
             for cat, name, price in defaults:
                 cur.execute(
@@ -163,7 +173,7 @@ def get_user(user_id):
     conn = get_db()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        cur.execute("SELECT * FROM users WHERE user_id = %s", (user_id,))
+        cur.execute("SELECT * FROM users WHERE user_id = %s", (int(user_id),))
         return cur.fetchone()
     finally:
         cur.close()
@@ -177,7 +187,7 @@ def add_user(user_id, username, first_name):
         cur.execute(
             "INSERT INTO users (user_id, username, first_name) VALUES (%s, %s, %s) "
             "ON CONFLICT (user_id) DO NOTHING",
-            (user_id, username, first_name),
+            (int(user_id), username, first_name),
         )
         conn.commit()
     finally:
@@ -191,7 +201,7 @@ def update_balance(user_id, amount):
     try:
         cur.execute(
             "UPDATE users SET balance = balance + %s WHERE user_id = %s",
-            (amount, user_id),
+            (int(amount), int(user_id)),
         )
         conn.commit()
     finally:
@@ -373,6 +383,8 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users_menu")],
             [InlineKeyboardButton("📦 مدیریت محصولات", callback_data="admin_products_menu")],
+            [InlineKeyboardButton("🌐 مدیریت کانفیگ v2ray", callback_data="admin_v2ray_menu")],
+            [InlineKeyboardButton("🍎 مدیریت اپل ایدی", callback_data="admin_apple_menu")],
             [InlineKeyboardButton("💳 پرداخت‌های در انتظار", callback_data="admin_pending")],
             [InlineKeyboardButton("📋 آخرین سفارشات", callback_data="admin_orders")],
             [InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast")],
@@ -444,13 +456,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # --- خرید محصول ---
+    # --- خرید محصول (با کانفیگ خودکار) ---
     elif data.startswith("buy_"):
         prod_id = int(data.split("_")[1])
         conn = get_db()
         cur = conn.cursor()
         try:
-            cur.execute("SELECT name, price FROM products WHERE id = %s AND active = TRUE", (prod_id,))
+            cur.execute(
+                "SELECT name, price, category FROM products WHERE id = %s AND active = TRUE",
+                (prod_id,),
+            )
             row = cur.fetchone()
         finally:
             cur.close()
@@ -458,8 +473,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not row:
             await query.edit_message_text("❌ محصول پیدا نشد.")
             return
-        name, price = row
-        await handle_purchase(query, user_id, name, price)
+        name, price, category = row
+        await handle_purchase(query, context, user_id, name, price, category)
 
     # --- تاریخچه خرید ---
     elif data == "my_orders":
@@ -516,6 +531,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             orders_count = cur.fetchone()[0]
             cur.execute("SELECT COALESCE(SUM(price), 0) FROM orders")
             total_sales = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM configs WHERE category = 'v2ray' AND used = FALSE")
+            v2ray_avail = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM configs WHERE category = 'apple' AND used = FALSE")
+            apple_avail = cur.fetchone()[0]
         finally:
             cur.close()
             conn.close()
@@ -526,7 +545,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📦 سفارشات: {orders_count}\n"
             f"💵 مجموع فروش: {total_sales:,} تومان\n"
             f"✅ پرداخت‌های تایید شده: {approved_pays}\n"
-            f"⏳ پرداخت‌های در انتظار: {pending_pays}",
+            f"⏳ پرداخت‌های در انتظار: {pending_pays}\n\n"
+            f"🌐 کانفیگ v2ray موجود: {v2ray_avail}\n"
+            f"🍎 اپل ایدی موجود: {apple_avail}",
             parse_mode="Markdown",
         )
 
@@ -597,15 +618,139 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "این فرمت رو بفرست:\n"
             "`دسته | اسم | قیمت`\n\n"
             "مثال:\n"
-            "`v2ray | سه ماهه ۳۰۰ گیگ | 250000`"
+            "`v2ray | سه ماهه ۳۰۰ گیگ | 250000`",
+            parse_mode="Markdown",
         )
 
     elif data == "admin_del_product" and user_id == ADMIN_ID:
         context.user_data["awaiting"] = "del_product"
         await query.edit_message_text(
-            "🗑 **حذف محصول**\n\n"
-            "آیدی محصول رو بفرست (از لیست محصولات):"
+            "🗑 **حذف محصول**\n\nآیدی محصول رو بفرست (از لیست محصولات):"
         )
+
+    # --- پنل ادمین: منوی v2ray ---
+    elif data == "admin_v2ray_menu" and user_id == ADMIN_ID:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM configs WHERE category = 'v2ray' AND used = FALSE")
+            avail = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM configs WHERE category = 'v2ray' AND used = TRUE")
+            used = cur.fetchone()[0]
+        finally:
+            cur.close()
+            conn.close()
+        keyboard = [
+            [InlineKeyboardButton("➕ افزودن کانفیگ متنی", callback_data="admin_v2_add_text")],
+            [InlineKeyboardButton("🖼 افزودن کانفیگ عکسی", callback_data="admin_v2_add_photo")],
+            [InlineKeyboardButton("📋 لیست کانفیگ‌ها", callback_data="admin_v2_list")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")],
+        ]
+        await query.edit_message_text(
+            f"🌐 **مدیریت کانفیگ v2ray**\n\n"
+            f"✅ موجود: {avail}\n"
+            f"❌ استفاده شده: {used}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
+    elif data == "admin_v2_add_text" and user_id == ADMIN_ID:
+        context.user_data["awaiting"] = "v2_add_text"
+        await query.edit_message_text(
+            "🌐 **افزودن کانفیگ متنی v2ray**\n\n"
+            "کانفیگ‌ها رو **هر کدوم تو یه خط** بفرست :\n\n"
+            "مثال:\n"
+            "`vless://abc123...`\n"
+            "`vless://def456...`",
+            parse_mode="Markdown",
+        )
+
+    elif data == "admin_v2_add_photo" and user_id == ADMIN_ID:
+        context.user_data["awaiting"] = "v2_add_photo"
+        await query.edit_message_text(
+            "🖼 **افزودن کانفیگ عکسی v2ray**\n\n"
+            "عکس کانفیگ (QR) رو بفرست. هر عکس یه کانفیگ حساب میشه."
+        )
+
+    elif data == "admin_v2_list" and user_id == ADMIN_ID:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT id, type, used FROM configs WHERE category = 'v2ray' ORDER BY id DESC LIMIT 30")
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+        if not rows:
+            await query.edit_message_text("📋 هیچ کانفیگی نیست.")
+            return
+        text = "📋 **آخرین ۳۰ کانفیگ v2ray:**\n\n"
+        for r in rows:
+            status = "✅" if not r[2] else "❌"
+            text += f"{status} `{r[0]}` | {r[1]}\n"
+        await query.edit_message_text(text, parse_mode="Markdown")
+
+    # --- پنل ادمین: منوی اپل ایدی ---
+    elif data == "admin_apple_menu" and user_id == ADMIN_ID:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT COUNT(*) FROM configs WHERE category = 'apple' AND used = FALSE")
+            avail = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM configs WHERE category = 'apple' AND used = TRUE")
+            used = cur.fetchone()[0]
+        finally:
+            cur.close()
+            conn.close()
+        keyboard = [
+            [InlineKeyboardButton("➕ افزودن اپل ایدی متنی", callback_data="admin_ap_add_text")],
+            [InlineKeyboardButton("🖼 افزودن اپل ایدی عکسی", callback_data="admin_ap_add_photo")],
+            [InlineKeyboardButton("📋 لیست اپل ایدی‌ها", callback_data="admin_ap_list")],
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="admin_back")],
+        ]
+        await query.edit_message_text(
+            f"🍎 **مدیریت اپل ایدی**\n\n"
+            f"✅ موجود: {avail}\n"
+            f"❌ استفاده شده: {used}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown",
+        )
+
+    elif data == "admin_ap_add_text" and user_id == ADMIN_ID:
+        context.user_data["awaiting"] = "ap_add_text"
+        await query.edit_message_text(
+            "🍎 **افزودن اپل ایدی متنی**\n\n"
+            "اکانت‌ها رو **هر کدوم تو یه خط** بفرست :\n\n"
+            "مثال:\n"
+            "`email1@gmail.com:pass1`\n"
+            "`email2@gmail.com:pass2`",
+            parse_mode="Markdown",
+        )
+
+    elif data == "admin_ap_add_photo" and user_id == ADMIN_ID:
+        context.user_data["awaiting"] = "ap_add_photo"
+        await query.edit_message_text(
+            "🖼 **افزودن اپل ایدی عکسی**\n\n"
+            "عکس اپل ایدی رو بفرست. هر عکس یه اپل ایدی حساب میشه."
+        )
+
+    elif data == "admin_ap_list" and user_id == ADMIN_ID:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT id, type, used FROM configs WHERE category = 'apple' ORDER BY id DESC LIMIT 30")
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+            conn.close()
+        if not rows:
+            await query.edit_message_text("📋 هیچ اپل ایدی نیست.")
+            return
+        text = "📋 **آخرین ۳۰ اپل ایدی:**\n\n"
+        for r in rows:
+            status = "✅" if not r[2] else "❌"
+            text += f"{status} `{r[0]}` | {r[1]}\n"
+        await query.edit_message_text(text, parse_mode="Markdown")
 
     # --- پنل ادمین: پرداخت‌های در انتظار ---
     elif data == "admin_pending" and user_id == ADMIN_ID:
@@ -731,6 +876,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users_menu")],
             [InlineKeyboardButton("📦 مدیریت محصولات", callback_data="admin_products_menu")],
+            [InlineKeyboardButton("🌐 مدیریت کانفیگ v2ray", callback_data="admin_v2ray_menu")],
+            [InlineKeyboardButton("🍎 مدیریت اپل ایدی", callback_data="admin_apple_menu")],
             [InlineKeyboardButton("💳 پرداخت‌های در انتظار", callback_data="admin_pending")],
             [InlineKeyboardButton("📋 آخرین سفارشات", callback_data="admin_orders")],
             [InlineKeyboardButton("📢 پیام همگانی", callback_data="admin_broadcast")],
@@ -754,9 +901,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if row and row[2] == "pending":
                 cur.execute("UPDATE payments SET status = 'approved' WHERE id = %s", (pay_id,))
                 conn.commit()
-                update_balance(row[0], row[1])
+                update_balance(int(row[0]), int(row[1]))
                 await context.bot.send_message(
-                    chat_id=row[0],
+                    chat_id=int(row[0]),
                     text=f"✅ پرداخت شما تایید شد.\n💰 {row[1]:,} تومان به موجودی اضافه شد.",
                 )
                 await query.edit_message_caption(
@@ -777,7 +924,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cur.execute("UPDATE payments SET status = 'rejected' WHERE id = %s", (pay_id,))
                 conn.commit()
                 await context.bot.send_message(
-                    chat_id=row[0],
+                    chat_id=int(row[0]),
                     text="❌ متاسفانه رسید شما تایید نشد.",
                 )
                 await query.edit_message_caption(caption=f"❌ پرداخت #{pay_id} رد شد.")
@@ -786,6 +933,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.close()
 
 
+# ⬇️ تکه ۴ اینجا
 async def show_card(query, amount):
     card = get_setting("card_number")
     owner = get_setting("card_owner")
@@ -805,9 +953,11 @@ async def show_card(query, amount):
     )
 
 
-async def handle_purchase(query, user_id, plan, price):
+# ---------- خرید محصول با کانفیگ خودکار ----------
+async def handle_purchase(query, context, user_id, name, price, category):
     user = get_user(user_id)
     balance = user["balance"] if user else 0
+
     if balance < price:
         await query.edit_message_text(
             f"❌ **موجودی کافی نیست**\n\n"
@@ -817,30 +967,82 @@ async def handle_purchase(query, user_id, plan, price):
             parse_mode="Markdown",
         )
         return
-    update_balance(user_id, -price)
+
+    # گرفتن اولین کانفیگ استفاده نشده
+    conn = get_db()
+    cur = conn.cursor()
+    config = None
+    try:
+        cur.execute(
+            "SELECT id, type, content FROM configs WHERE category = %s AND used = FALSE ORDER BY id LIMIT 1",
+            (category,),
+        )
+        config = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+
+    if not config:
+        await query.edit_message_text(
+            f"❌ **موجودی این محصول تموم شده**\n\n"
+            f"لطفاً بعداً امتحان کن یا به پشتیبانی پیام بده.",
+            parse_mode="Markdown",
+        )
+        return
+
+    config_id, config_type, content = config
+
+    # کم کردن موجودی
+    update_balance(int(user_id), -int(price))
+
+    # علامت زدن کانفیگ به عنوان استفاده شده
     conn = get_db()
     cur = conn.cursor()
     try:
         cur.execute(
+            "UPDATE configs SET used = TRUE, used_by = %s, used_at = NOW() WHERE id = %s",
+            (int(user_id), config_id),
+        )
+        cur.execute(
             "INSERT INTO orders (user_id, product_name, price, status) VALUES (%s, %s, %s, 'paid')",
-            (user_id, plan, price),
+            (int(user_id), name, int(price)),
         )
         conn.commit()
     finally:
         cur.close()
         conn.close()
-    support = get_setting("support_id")
-    await query.edit_message_text(
-        f"✅ **خرید موفق!**\n\n"
-        f"📦 محصول: {plan}\n"
-        f"💰 مبلغ: {price:,} تومان\n\n"
-        f"برای دریافت، به پشتیبانی پیام بده:\n{support}",
-        parse_mode="Markdown",
-    )
+
+    # ارسال محصول به مشتری
+    if config_type == "text":
+        await query.edit_message_text(
+            f"✅ **خرید موفق!**\n\n"
+            f"📦 محصول: {name}\n"
+            f"💰 مبلغ: {price:,} تومان\n\n"
+            f"🔑 **محصول شما:**\n\n"
+            f"`{content}`",
+            parse_mode="Markdown",
+        )
+    else:
+        # عکس
+        await query.edit_message_text(
+            f"✅ **خرید موفق!**\n\n"
+            f"📦 محصول: {name}\n"
+            f"💰 مبلغ: {price:,} تومان\n\n"
+            f"🖼 محصول شما در پیام بعدی ارسال میشه:",
+            parse_mode="Markdown",
+        )
+        try:
+            await context.bot.send_photo(
+                chat_id=int(user_id),
+                photo=content,
+                caption=f"🔑 محصول شما: {name}",
+            )
+        except Exception:
+            pass
 
 
-# ⬇️ تکه ۴ اینجا
-# ---------- هندلر پیام‌ها ----------
+# ⬇️ تکه ۵ اینجا
+# ---------- هندلر پیام‌ها (رسید، مبلغ، ادمین) ----------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     awaiting = context.user_data.get("awaiting")
@@ -893,7 +1095,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cur.execute(
                 "INSERT INTO payments (user_id, amount, status) VALUES (%s, %s, 'pending') RETURNING id",
-                (user_id, amount),
+                (int(user_id), int(amount)),
             )
             pay_id = cur.fetchone()[0]
             conn.commit()
@@ -922,7 +1124,43 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ رسید ارسال شد. منتظر تایید باش. 🙏")
         return
 
-    # --- پیام‌های ادمین ---
+    # --- عکس کانفیگ v2ray (ادمین) ---
+    if awaiting == "v2_add_photo" and user_id == ADMIN_ID and update.message.photo:
+        photo = update.message.photo[-1]
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO configs (category, type, content) VALUES ('v2ray', 'photo', %s)",
+                (photo.file_id,),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+        context.user_data["awaiting"] = None
+        await update.message.reply_text("✅ کانفیگ عکسی v2ray اضافه شد.")
+        return
+
+    # --- عکس اپل ایدی (ادمین) ---
+    if awaiting == "ap_add_photo" and user_id == ADMIN_ID and update.message.photo:
+        photo = update.message.photo[-1]
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO configs (category, type, content) VALUES ('apple', 'photo', %s)",
+                (photo.file_id,),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
+        context.user_data["awaiting"] = None
+        await update.message.reply_text("✅ اپل ایدی عکسی اضافه شد.")
+        return
+
+    # --- پیام‌های متنی ادمین ---
     if user_id == ADMIN_ID:
         text = update.message.text
 
@@ -947,7 +1185,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             count = 0
             for r in rows:
                 try:
-                    await context.bot.send_message(chat_id=r[0], text=text)
+                    await context.bot.send_message(chat_id=int(r[0]), text=text)
                     count += 1
                 except Exception:
                     pass
@@ -1025,10 +1263,42 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
             except Exception:
                 await update.message.reply_text("❌ آیدی نامعتبر.")
+        elif awaiting == "v2_add_text":
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                for line in lines:
+                    cur.execute(
+                        "INSERT INTO configs (category, type, content) VALUES ('v2ray', 'text', %s)",
+                        (line,),
+                    )
+                conn.commit()
+            finally:
+                cur.close()
+                conn.close()
+            await update.message.reply_text(f"✅ {len(lines)} کانفیگ v2ray اضافه شد.")
+        elif awaiting == "ap_add_text":
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                for line in lines:
+                    cur.execute(
+                        "INSERT INTO configs (category, type, content) VALUES ('apple', 'text', %s)",
+                        (line,),
+                    )
+                conn.commit()
+            finally:
+                cur.close()
+                conn.close()
+            await update.message.reply_text(f"✅ {len(lines)} اپل ایدی اضافه شد.")
 
         context.user_data["awaiting"] = None
         return
-        # ---------- هندلرهای اضافی ادمین ----------
+
+
+# ---------- موجودی دستی ادمین ----------
 async def admin_balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1062,33 +1332,7 @@ async def admin_balance_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text(f"➖ {amount:,} تومان از کاربر {target} کم شد.")
 
 
-# ---------- تایید/رد پرداخت با کپشن ----------
-async def photo_reply_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # اگه ادمین روی یه عکس رسید ریپلای کنه و مبلغ بنویسه، اون مبلغ رو ثبت می‌کنه
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not update.message.reply_to_message:
-        return
-    if not update.message.reply_to_message.caption:
-        return
-    if "رسید جدید" not in update.message.reply_to_message.caption:
-        return
-
-    text = update.message.text.strip()
-    if not text.isdigit():
-        return
-
-    amount = int(text)
-    # استخراج pay_id از کپشن
-    caption = update.message.reply_to_message.caption
-    try:
-        # دنبال "پرداخت #" نمی‌گردیم، از دیتابیس آخرین pending رو می‌گیریم
-        # اینجا فقط تایید دستی مبلغ
-        pass
-    except Exception:
-        pass
-
-
+# ⬇️ تکه ۶ اینجا
 # ---------- اجرا ----------
 if __name__ == "__main__":
     threading.Thread(target=run_web, daemon=True).start()
@@ -1105,5 +1349,5 @@ if __name__ == "__main__":
 
     print("ربات آنلاین شد...")
     app.run_polling()
-        
+
 
