@@ -18,9 +18,7 @@ from telegram.ext import (
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
-# ✅ آیدی عددی ادمین
 ADMIN_ID = 7730300274
-
 SETTINGS_FILE = "settings.json"
 
 DEFAULT_SETTINGS = {
@@ -31,7 +29,6 @@ DEFAULT_SETTINGS = {
 }
 
 
-# ---------- خواندن و ذخیره ----------
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -50,13 +47,11 @@ def save_settings(settings):
         logging.error(f"خطا در ذخیره: {e}")
 
 
-# ---------- چک جوین اجباری ----------
 async def is_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = load_settings()
     channels = settings.get("force_join", [])
     if not channels:
         return True
-
     for ch in channels:
         try:
             member = await context.bot.get_chat_member(
@@ -69,7 +64,6 @@ async def is_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return True
 
 
-# ---------- /start ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = load_settings()
     user_id = update.effective_user.id
@@ -108,12 +102,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ---------- هندلر کیبورد ----------
+# ---------- هندلر کیبورد (اصلاح‌شده) ----------
 async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
+    text = update.message.text.strip()  # حذف فاصله اضافی
     user_id = update.effective_user.id
 
-    if text == "🍎 اپل ایدی":
+    # چک با "in" به جای "==" تا مقاوم‌تر بشه
+    if "اپل ایدی" in text:
         keyboard = [
             [
                 InlineKeyboardButton("اپ استور", callback_data="apple_appstore"),
@@ -125,14 +120,14 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
-    elif text == "🔐 فیلتر شکن":
+    elif "فیلتر شکن" in text:
         keyboard = [[InlineKeyboardButton("ترکیه", callback_data="vpn_turkey")]]
         await update.message.reply_text(
             "سرور مد نظرت انتخاب کن :",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
-    elif text == "⚙️ پنل ادمین" and user_id == ADMIN_ID:
+    elif "پنل ادمین" in text and user_id == ADMIN_ID:
         keyboard = [
             [InlineKeyboardButton("📊 آمار", callback_data="admin_stats")],
             [InlineKeyboardButton("✏️ ویرایش متن استارت", callback_data="admin_edit_start")],
@@ -146,7 +141,6 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ---------- هندلر پیام ادمین ----------
 async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     awaiting = context.user_data.get("awaiting")
@@ -188,7 +182,6 @@ async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data["awaiting"] = None
 
 
-# ---------- هندلر دکمه شیشه‌ای ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -233,7 +226,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting"] = "force_join"
 
 
-# ---------- اجرا ----------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = ApplicationBuilder().token(TOKEN).build()
@@ -241,7 +233,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_handler))
 
     print("ربات آنلاین شد...")
     app.run_polling()
