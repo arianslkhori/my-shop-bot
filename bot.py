@@ -207,10 +207,7 @@ def update_balance(user_id, amount):
     finally:
         cur.close()
         conn.close()
-
-
-# ⬇️ تکه ۲ اینجا
-# ---------- چک جوین اجباری ----------
+        # ---------- چک جوین اجباری ----------
 async def check_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if get_setting("channel_lock") != "on":
         return True
@@ -274,7 +271,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ["🛒 خرید محصولات", "💼 حساب کاربری"],
         ["💰 افزایش موجودی", "📞 پشتیبانی"],
     ]
-    if user_id == ADMIN_ID:
+    if int(user_id) == int(ADMIN_ID):
         keyboard.append(["⚙️ پنل ادمین"])
 
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -283,9 +280,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- هندلر کیبورد ----------
 async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
     text = update.message.text
     user_id = update.effective_user.id
 
+    # اگه تو حالت انتظار هستیم، این handler کار نکنه
     if context.user_data.get("awaiting"):
         return
 
@@ -327,7 +328,7 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn = get_db()
         cur = conn.cursor()
         try:
-            cur.execute("SELECT COUNT(*) FROM orders WHERE user_id = %s", (user_id,))
+            cur.execute("SELECT COUNT(*) FROM orders WHERE user_id = %s", (int(user_id),))
             orders_count = cur.fetchone()[0]
         finally:
             cur.close()
@@ -378,7 +379,7 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif text == "⚙️ پنل ادمین" and user_id == ADMIN_ID:
+    elif text == "⚙️ پنل ادمین" and int(user_id) == int(ADMIN_ID):
         keyboard = [
             [InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users_menu")],
@@ -406,6 +407,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = query.data
 
+    # اگه دکمه ادمین بود و کاربر ادمین نبود، رد کن
+    if data.startswith("admin_") and int(user_id) != int(ADMIN_ID):
+        await query.answer("❌ دسترسی نداری!", show_alert=True)
+        return
+
     # --- بازگشت ---
     if data == "back_main":
         context.user_data["awaiting"] = None
@@ -414,7 +420,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ["🛒 خرید محصولات", "💼 حساب کاربری"],
             ["💰 افزایش موجودی", "📞 پشتیبانی"],
         ]
-        if user_id == ADMIN_ID:
+        if int(user_id) == int(ADMIN_ID):
             keyboard.append(["⚙️ پنل ادمین"])
         await query.message.reply_text(
             "منوی اصلی:",
@@ -456,7 +462,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    # --- خرید محصول (با کانفیگ خودکار) ---
+    # --- خرید محصول ---
     elif data.startswith("buy_"):
         prod_id = int(data.split("_")[1])
         conn = get_db()
@@ -483,7 +489,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cur.execute(
                 "SELECT product_name, price, created_at FROM orders WHERE user_id = %s ORDER BY created_at DESC LIMIT 10",
-                (user_id,),
+                (int(user_id),),
             )
             rows = cur.fetchall()
         finally:
@@ -515,7 +521,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📸 لطفاً عکس رسید رو بفرست :")
 
     # --- پنل ادمین: آمار ---
-    elif data == "admin_stats" and user_id == ADMIN_ID:
+    elif data == "admin_stats":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -552,7 +558,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     # --- پنل ادمین: منوی کاربران ---
-    elif data == "admin_users_menu" and user_id == ADMIN_ID:
+    elif data == "admin_users_menu":
         keyboard = [
             [InlineKeyboardButton("📋 لیست کاربران", callback_data="admin_users")],
             [InlineKeyboardButton("🔍 جستجو با آیدی", callback_data="admin_find_user")],
@@ -564,7 +570,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_users" and user_id == ADMIN_ID:
+    elif data == "admin_users":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -578,12 +584,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"🆔 `{r[0]}` - {r[1]} - {r[2]:,} تومان\n"
         await query.edit_message_text(text, parse_mode="Markdown")
 
-    elif data == "admin_find_user" and user_id == ADMIN_ID:
+    elif data == "admin_find_user":
         context.user_data["awaiting"] = "find_user"
         await query.edit_message_text("🆔 آیدی عددی کاربر رو بفرست :")
 
     # --- پنل ادمین: منوی محصولات ---
-    elif data == "admin_products_menu" and user_id == ADMIN_ID:
+    elif data == "admin_products_menu":
         keyboard = [
             [InlineKeyboardButton("📋 لیست محصولات", callback_data="admin_products")],
             [InlineKeyboardButton("➕ افزودن محصول", callback_data="admin_add_product")],
@@ -596,7 +602,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_products" and user_id == ADMIN_ID:
+    elif data == "admin_products":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -611,7 +617,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"{status} `{r[0]}` | {r[1]} | {r[2]} | {r[3]:,}\n"
         await query.edit_message_text(text, parse_mode="Markdown")
 
-    elif data == "admin_add_product" and user_id == ADMIN_ID:
+    elif data == "admin_add_product":
         context.user_data["awaiting"] = "add_product"
         await query.edit_message_text(
             "➕ **افزودن محصول**\n\n"
@@ -622,14 +628,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_del_product" and user_id == ADMIN_ID:
+    elif data == "admin_del_product":
         context.user_data["awaiting"] = "del_product"
         await query.edit_message_text(
             "🗑 **حذف محصول**\n\nآیدی محصول رو بفرست (از لیست محصولات):"
         )
 
-    # --- پنل ادمین: منوی v2ray ---
-    elif data == "admin_v2ray_menu" and user_id == ADMIN_ID:
+    # --- پنل ادمین: v2ray ---
+    elif data == "admin_v2ray_menu":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -654,7 +660,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_v2_add_text" and user_id == ADMIN_ID:
+    elif data == "admin_v2_add_text":
         context.user_data["awaiting"] = "v2_add_text"
         await query.edit_message_text(
             "🌐 **افزودن کانفیگ متنی v2ray**\n\n"
@@ -665,14 +671,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_v2_add_photo" and user_id == ADMIN_ID:
+    elif data == "admin_v2_add_photo":
         context.user_data["awaiting"] = "v2_add_photo"
         await query.edit_message_text(
             "🖼 **افزودن کانفیگ عکسی v2ray**\n\n"
             "عکس کانفیگ (QR) رو بفرست. هر عکس یه کانفیگ حساب میشه."
         )
 
-    elif data == "admin_v2_list" and user_id == ADMIN_ID:
+    elif data == "admin_v2_list":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -690,8 +696,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"{status} `{r[0]}` | {r[1]}\n"
         await query.edit_message_text(text, parse_mode="Markdown")
 
-    # --- پنل ادمین: منوی اپل ایدی ---
-    elif data == "admin_apple_menu" and user_id == ADMIN_ID:
+    # --- پنل ادمین: اپل ایدی ---
+    elif data == "admin_apple_menu":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -716,7 +722,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_ap_add_text" and user_id == ADMIN_ID:
+    elif data == "admin_ap_add_text":
         context.user_data["awaiting"] = "ap_add_text"
         await query.edit_message_text(
             "🍎 **افزودن اپل ایدی متنی**\n\n"
@@ -727,14 +733,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_ap_add_photo" and user_id == ADMIN_ID:
+    elif data == "admin_ap_add_photo":
         context.user_data["awaiting"] = "ap_add_photo"
         await query.edit_message_text(
             "🖼 **افزودن اپل ایدی عکسی**\n\n"
             "عکس اپل ایدی رو بفرست. هر عکس یه اپل ایدی حساب میشه."
         )
 
-    elif data == "admin_ap_list" and user_id == ADMIN_ID:
+    elif data == "admin_ap_list":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -753,7 +759,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown")
 
     # --- پنل ادمین: پرداخت‌های در انتظار ---
-    elif data == "admin_pending" and user_id == ADMIN_ID:
+    elif data == "admin_pending":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -771,7 +777,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown")
 
     # --- پنل ادمین: سفارشات ---
-    elif data == "admin_orders" and user_id == ADMIN_ID:
+    elif data == "admin_orders":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -786,12 +792,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown")
 
     # --- پنل ادمین: پیام همگانی ---
-    elif data == "admin_broadcast" and user_id == ADMIN_ID:
+    elif data == "admin_broadcast":
         context.user_data["awaiting"] = "broadcast"
         await query.edit_message_text("📢 پیام همگانی رو بفرست :")
 
     # --- پنل ادمین: جوین اجباری ---
-    elif data == "admin_forcejoin_menu" and user_id == ADMIN_ID:
+    elif data == "admin_forcejoin_menu":
         status = get_setting("channel_lock")
         keyboard = [
             [InlineKeyboardButton(f"{'🟢 روشن' if status == 'on' else '🔴 خاموش'}", callback_data="admin_toggle_lock")],
@@ -807,17 +813,17 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_toggle_lock" and user_id == ADMIN_ID:
+    elif data == "admin_toggle_lock":
         current = get_setting("channel_lock")
         new = "off" if current == "on" else "on"
         set_setting("channel_lock", new)
         await query.edit_message_text(f"✅ وضعیت جوین اجباری: **{new}**", parse_mode="Markdown")
 
-    elif data == "admin_add_channel" and user_id == ADMIN_ID:
+    elif data == "admin_add_channel":
         context.user_data["awaiting"] = "add_channel"
         await query.edit_message_text("📢 آیدی کانال رو با @ بفرست (مثلاً `@mychannel`):")
 
-    elif data == "admin_clear_channels" and user_id == ADMIN_ID:
+    elif data == "admin_clear_channels":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -828,7 +834,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.close()
         await query.edit_message_text("✅ همه کانال‌ها پاک شدن.")
 
-    elif data == "admin_list_channels" and user_id == ADMIN_ID:
+    elif data == "admin_list_channels":
         conn = get_db()
         cur = conn.cursor()
         try:
@@ -846,7 +852,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, parse_mode="Markdown")
 
     # --- پنل ادمین: تنظیمات ---
-    elif data == "admin_settings_menu" and user_id == ADMIN_ID:
+    elif data == "admin_settings_menu":
         keyboard = [
             [InlineKeyboardButton("💰 تغییر شماره کارت", callback_data="admin_card")],
             [InlineKeyboardButton("📞 تغییر آیدی پشتیبانی", callback_data="admin_support")],
@@ -859,19 +865,19 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
         )
 
-    elif data == "admin_card" and user_id == ADMIN_ID:
+    elif data == "admin_card":
         context.user_data["awaiting"] = "card_number"
         await query.edit_message_text("💰 شماره کارت جدید رو بفرست :")
 
-    elif data == "admin_support" and user_id == ADMIN_ID:
+    elif data == "admin_support":
         context.user_data["awaiting"] = "support_id"
         await query.edit_message_text("📞 آیدی پشتیبانی جدید رو بفرست :")
 
-    elif data == "admin_start_text" and user_id == ADMIN_ID:
+    elif data == "admin_start_text":
         context.user_data["awaiting"] = "start_text"
         await query.edit_message_text("✏️ متن استارت جدید رو بفرست :")
 
-    elif data == "admin_back" and user_id == ADMIN_ID:
+    elif data == "admin_back":
         keyboard = [
             [InlineKeyboardButton("📊 آمار کامل", callback_data="admin_stats")],
             [InlineKeyboardButton("👥 مدیریت کاربران", callback_data="admin_users_menu")],
@@ -891,7 +897,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     # --- تایید و رد پرداخت ---
-    elif data.startswith("approve_pay_") and user_id == ADMIN_ID:
+    elif data.startswith("approve_pay_"):
         pay_id = int(data.split("_")[2])
         conn = get_db()
         cur = conn.cursor()
@@ -913,7 +919,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur.close()
             conn.close()
 
-    elif data.startswith("reject_pay_") and user_id == ADMIN_ID:
+    elif data.startswith("reject_pay_"):
         pay_id = int(data.split("_")[2])
         conn = get_db()
         cur = conn.cursor()
@@ -953,7 +959,6 @@ async def show_card(query, amount):
     )
 
 
-# ---------- خرید محصول با کانفیگ خودکار ----------
 async def handle_purchase(query, context, user_id, name, price, category):
     user = get_user(user_id)
     balance = user["balance"] if user else 0
@@ -968,7 +973,6 @@ async def handle_purchase(query, context, user_id, name, price, category):
         )
         return
 
-    # گرفتن اولین کانفیگ استفاده نشده
     conn = get_db()
     cur = conn.cursor()
     config = None
@@ -991,11 +995,8 @@ async def handle_purchase(query, context, user_id, name, price, category):
         return
 
     config_id, config_type, content = config
-
-    # کم کردن موجودی
     update_balance(int(user_id), -int(price))
 
-    # علامت زدن کانفیگ به عنوان استفاده شده
     conn = get_db()
     cur = conn.cursor()
     try:
@@ -1012,7 +1013,6 @@ async def handle_purchase(query, context, user_id, name, price, category):
         cur.close()
         conn.close()
 
-    # ارسال محصول به مشتری
     if config_type == "text":
         await query.edit_message_text(
             f"✅ **خرید موفق!**\n\n"
@@ -1023,7 +1023,6 @@ async def handle_purchase(query, context, user_id, name, price, category):
             parse_mode="Markdown",
         )
     else:
-        # عکس
         await query.edit_message_text(
             f"✅ **خرید موفق!**\n\n"
             f"📦 محصول: {name}\n"
@@ -1042,7 +1041,7 @@ async def handle_purchase(query, context, user_id, name, price, category):
 
 
 # ⬇️ تکه ۵ اینجا
-# ---------- هندلر پیام‌ها (رسید، مبلغ، ادمین) ----------
+# ---------- هندلر پیام‌ها ----------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     awaiting = context.user_data.get("awaiting")
@@ -1124,8 +1123,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ رسید ارسال شد. منتظر تایید باش. 🙏")
         return
 
-    # --- عکس کانفیگ v2ray (ادمین) ---
-    if awaiting == "v2_add_photo" and user_id == ADMIN_ID and update.message.photo:
+    # --- عکس کانفیگ v2ray ---
+    if awaiting == "v2_add_photo" and int(user_id) == int(ADMIN_ID) and update.message.photo:
         photo = update.message.photo[-1]
         conn = get_db()
         cur = conn.cursor()
@@ -1142,8 +1141,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ کانفیگ عکسی v2ray اضافه شد.")
         return
 
-    # --- عکس اپل ایدی (ادمین) ---
-    if awaiting == "ap_add_photo" and user_id == ADMIN_ID and update.message.photo:
+    # --- عکس اپل ایدی ---
+    if awaiting == "ap_add_photo" and int(user_id) == int(ADMIN_ID) and update.message.photo:
         photo = update.message.photo[-1]
         conn = get_db()
         cur = conn.cursor()
@@ -1161,7 +1160,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # --- پیام‌های متنی ادمین ---
-    if user_id == ADMIN_ID:
+    if int(user_id) == int(ADMIN_ID):
         text = update.message.text
 
         if awaiting == "card_number":
@@ -1298,13 +1297,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# ---------- موجودی دستی ادمین ----------
 async def admin_balance_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = update.effective_user.id
 
-    if user_id != ADMIN_ID:
+    if int(user_id) != int(ADMIN_ID):
         return
 
     data = query.data
@@ -1351,3 +1349,4 @@ if __name__ == "__main__":
     app.run_polling()
 
 
+        
