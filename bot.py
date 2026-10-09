@@ -1,6 +1,8 @@
 import os
+import threading
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from flask import Flask
 from telegram import (
     Update,
     ReplyKeyboardMarkup,
@@ -28,6 +30,21 @@ DEFAULT_SETTINGS = {
 }
 
 
+# ---------- وب‌سرور کوچیک برای Render ----------
+web_app = Flask(__name__)
+
+
+@web_app.route("/")
+def home():
+    return "Bot is alive!"
+
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port)
+
+
+# ---------- دیتابیس ----------
 def get_db():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
@@ -261,7 +278,7 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚙️ پنل ادمین",
             reply_markup=InlineKeyboardMarkup(keyboard),
-        )
+    )
         # ---------- هندلر دکمه‌های شیشه‌ای ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -463,7 +480,7 @@ async def handle_purchase(query, user_id, plan, price):
         f"💰 مبلغ: {price:,} تومان\n\n"
         f"برای دریافت، به پشتیبانی پیام بده:\n{support}",
         parse_mode="Markdown",
-        )
+                   )
     # ---------- هندلر پیام‌ها (رسید، مبلغ، ادمین) ----------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -587,8 +604,13 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         # ---------- اجرا ----------
 if __name__ == "__main__":
+    # اجرای وب‌سرور در یک ترد جدا (برای Render)
+    threading.Thread(target=run_web, daemon=True).start()
+
+    # راه‌اندازی دیتابیس
     init_db()
 
+    # اجرای ربات
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -598,4 +620,5 @@ if __name__ == "__main__":
 
     print("ربات آنلاین شد...")
     app.run_polling()
-    
+        
+        
