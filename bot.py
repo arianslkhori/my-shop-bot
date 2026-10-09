@@ -173,6 +173,14 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
+    # اگه ادمین تو حالت انتظار ورودی باشه، این handler کار نکنه
+    if user_id == ADMIN_ID and context.user_data.get("awaiting"):
+        return
+
+    # اگه کاربر تو حالت انتظار مبلغ باشه، این handler کار نکنه
+    if context.user_data.get("awaiting") == "amount":
+        return
+
     # --- اپل ایدی ---
     if "اپل ایدی" in text:
         keyboard = [
@@ -215,25 +223,15 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user:
             balance = user["balance"]
             first_name = user["first_name"] or "کاربر"
-            username = user["username"]
-            username_text = f"@{username}" if username else "ندارد"
         else:
             balance = 0
             first_name = "کاربر"
-            username_text = "ندارد"
 
         text = (
-            f"╭───────────────────╮\n"
-            f"   💼  **حساب کاربری شما**\n"
-            f"╰───────────────────╯\n\n"
-            f"👤 **نام:** {first_name}\n"
-            f"🔗 **یوزرنیم:** {username_text}\n"
-            f"🆔 **آیدی عددی:** `{user_id}`\n\n"
-            f"╭───────────────────╮\n"
-            f"   💰  **موجودی شما**\n"
-            f"╰───────────────────╯\n\n"
-            f"**{balance:,}** تومان\n\n"
-            f"✨ برای افزایش موجودی از منوی اصلی استفاده کن."
+            f"💼 **حساب کاربری**\n\n"
+            f"👤 نام: {first_name}\n"
+            f"🆔 آیدی: `{user_id}`\n"
+            f"💰 موجودی: **{balance:,}** تومان"
         )
         await update.message.reply_text(text, parse_mode="Markdown")
 
@@ -260,8 +258,8 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚙️ پنل ادمین",
             reply_markup=InlineKeyboardMarkup(keyboard),
-            )
-   # ---------- هندلر دکمه‌های شیشه‌ای ----------
+)
+        # ---------- هندلر دکمه‌های شیشه‌ای ----------
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -269,6 +267,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if data == "back_main":
+        context.user_data["awaiting"] = None
         keyboard = [
             ["🍎 اپل ایدی", "🌐 خرید v2ray"],
             ["♾️ افزایش موجودی", "💼 حساب کاربری"],
@@ -431,17 +430,23 @@ async def handle_purchase(query, user_id, plan, price):
         f"💰 مبلغ: {price:,} تومان\n\n"
         f"برای دریافت، به پشتیبانی پیام بده:\n{support}",
         parse_mode="Markdown",
-            )
-# ---------- هندلر پیام‌ها (رسید، مبلغ، ادمین) ----------
+    )
+    # ---------- هندلر پیام‌ها (رسید، مبلغ، ادمین) ----------
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     awaiting = context.user_data.get("awaiting")
+
+    if not awaiting:
+        return
 
     # --- دریافت مبلغ برای افزایش موجودی ---
     if awaiting == "amount":
         text = update.message.text.strip()
         if not text.isdigit():
-            await update.message.reply_text("❌ لطفاً فقط عدد بفرست. مثلاً: `50000`", parse_mode="Markdown")
+            await update.message.reply_text(
+                "❌ لطفاً فقط عدد بفرست. مثلاً: `50000`",
+                parse_mode="Markdown",
+            )
             return
 
         amount = int(text)
@@ -558,9 +563,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
-    app.add_handler(MessageHandler(filters.PHOTO, message_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
     print("ربات آنلاین شد...")
     app.run_polling()
         
+    
