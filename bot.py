@@ -113,9 +113,6 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
 
-    if user_id == ADMIN_ID and context.user_data.get("awaiting"):
-        return
-
     if text == "🍎 اپل ایدی":
         keyboard = [
             [
@@ -147,6 +144,48 @@ async def keyboard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⚙️ پنل ادمین",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
+
+
+# ---------- هندلر پیام ادمین ----------
+async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    awaiting = context.user_data.get("awaiting")
+
+    if user_id != ADMIN_ID or not awaiting:
+        return
+
+    settings = load_settings()
+    text = update.message.text
+
+    if awaiting == "start_text":
+        settings["start_text"] = text
+        save_settings(settings)
+        await update.message.reply_text("✅ متن استارت ذخیره شد.")
+    elif awaiting == "profile_bio":
+        settings["profile_bio"] = text
+        save_settings(settings)
+        await update.message.reply_text("✅ بیو ذخیره شد.")
+    elif awaiting == "broadcast":
+        count = 0
+        for uid in settings["users"]:
+            try:
+                await context.bot.send_message(chat_id=uid, text=text)
+                count += 1
+            except Exception:
+                pass
+        await update.message.reply_text(f"✅ پیام به {count} کاربر ارسال شد.")
+    elif awaiting == "force_join":
+        if text.lower() == "clear":
+            settings["force_join"] = []
+            save_settings(settings)
+            await update.message.reply_text("✅ همه کانال‌ها پاک شدن.")
+        else:
+            if text not in settings["force_join"]:
+                settings["force_join"].append(text)
+                save_settings(settings)
+            await update.message.reply_text(f"✅ کانال {text} اضافه شد.")
+
+    context.user_data["awaiting"] = None
 
 
 # ---------- هندلر دکمه شیشه‌ای ----------
@@ -194,48 +233,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting"] = "force_join"
 
 
-# ---------- هندلر پیام ادمین ----------
-async def admin_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    awaiting = context.user_data.get("awaiting")
-
-    if user_id != ADMIN_ID or not awaiting:
-        return
-
-    settings = load_settings()
-    text = update.message.text
-
-    if awaiting == "start_text":
-        settings["start_text"] = text
-        save_settings(settings)
-        await update.message.reply_text("✅ متن استارت ذخیره شد.")
-    elif awaiting == "profile_bio":
-        settings["profile_bio"] = text
-        save_settings(settings)
-        await update.message.reply_text("✅ بیو ذخیره شد.")
-    elif awaiting == "broadcast":
-        count = 0
-        for uid in settings["users"]:
-            try:
-                await context.bot.send_message(chat_id=uid, text=text)
-                count += 1
-            except Exception:
-                pass
-        await update.message.reply_text(f"✅ پیام به {count} کاربر ارسال شد.")
-    elif awaiting == "force_join":
-        if text.lower() == "clear":
-            settings["force_join"] = []
-            save_settings(settings)
-            await update.message.reply_text("✅ همه کانال‌ها پاک شدن.")
-        else:
-            if text not in settings["force_join"]:
-                settings["force_join"].append(text)
-                save_settings(settings)
-            await update.message.reply_text(f"✅ کانال {text} اضافه شد.")
-
-    context.user_data["awaiting"] = None
-
-
 # ---------- اجرا ----------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -243,8 +240,8 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, keyboard_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_text_handler))
 
     print("ربات آنلاین شد...")
     app.run_polling()
